@@ -93,7 +93,7 @@ async function ensureSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
-    alter table plants add column if not exists ar_anchor jsonb not null default '{"x":50,"y":68,"scale":1}'::jsonb;
+    alter table plants add column if not exists ar_anchor jsonb not null default '{"mode":"screen","x":50,"y":68,"scale":1}'::jsonb;
   `);
 }
 
@@ -167,11 +167,16 @@ function dnaFor(rarity) {
 }
 
 function cleanAnchor(anchor) {
-  return {
+  const screenAnchor = {
+    mode: 'screen',
     x: Math.max(12, Math.min(88, Number(anchor?.x ?? 50))),
     y: Math.max(48, Math.min(86, Number(anchor?.y ?? 68))),
     scale: Math.max(0.65, Math.min(1.45, Number(anchor?.scale ?? 1))),
   };
+  if (anchor?.mode !== 'webxr') return screenAnchor;
+  const matrix = Array.isArray(anchor.matrix) ? anchor.matrix.map(Number).filter(Number.isFinite).slice(0, 16) : [];
+  if (matrix.length !== 16) return screenAnchor;
+  return { ...screenAnchor, mode: 'webxr', matrix };
 }
 
 async function getPlayerPayload(playerId, extras = {}) {
@@ -282,7 +287,7 @@ function getServiceStatus() {
       cacheConfigured: Boolean(process.env.REDIS_URL || process.env.VALKEY_URL),
     },
     auth: ['email-password'],
-    gameplay: ['wild seed discovery', 'seed pouch', 'GPS plant anchors', 'AR screen anchors'],
+    gameplay: ['wild seed discovery', 'seed pouch', 'GPS plant anchors', 'WebXR hit-test anchors'],
     futureAuth: ['Google OAuth', 'Microsoft OAuth'],
     rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate })),
   };
