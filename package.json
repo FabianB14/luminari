@@ -1,0 +1,16 @@
+{
+  "name": "luminari",
+  "version": "1.0.0",
+  "description": "Render-ready Node services for Luminari.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "worker": "node src/worker.js",
+    "cleanup": "node scripts/nightly-cleanup.js",
+    "check": "node --check src/server.js && node --check src/worker.js && node --check scripts/nightly-cleanup.js"
+  }
+}
