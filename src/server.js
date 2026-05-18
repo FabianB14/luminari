@@ -3,12 +3,19 @@ import http from 'node:http';
 const port = Number.parseInt(process.env.PORT ?? '10000', 10);
 const host = '0.0.0.0';
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 function jsonResponse(response, statusCode, body) {
   const payload = JSON.stringify(body, null, 2);
 
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
+    ...corsHeaders,
   });
   response.end(`${payload}\n`);
 }
@@ -28,6 +35,12 @@ function getServiceStatus() {
 
 const server = http.createServer((request, response) => {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, corsHeaders);
+    response.end();
+    return;
+  }
 
   if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
     jsonResponse(response, 200, getServiceStatus());
