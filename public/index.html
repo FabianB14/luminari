@@ -269,21 +269,21 @@
         base.account ||= { id: uid('player'), name: 'Guest Gardener', loggedIn: false };
         base.seeds ||= makeSeeds(base.player, 8, false);
         base.plants ||= [];
-        base.plants.forEach((plant) => normalizePlant(plant));
+        base.plants.forEach((plant) => normalizePlant(plant, base.account));
         if (!base.plants.length) {
-          base.plants.push(makePlant('Helicoradian', 'Common', base.player, 'starter'));
+          base.plants.push(makePlantForOwner('Helicoradian', 'Common', base.player, 'starter', base.account));
           base.selectedPlantId = base.plants[0].id;
         }
         save(base);
         return base;
       }
       function save(next = state) { localStorage.setItem(storeKey, JSON.stringify(next)); }
-      function normalizePlant(plant) {
+      function normalizePlant(plant, account) {
         plant.anchor ||= { lat: plant.lat, lon: plant.lon, placedAt: plant.createdAt || now() };
         plant.lat = plant.anchor.lat;
         plant.lon = plant.anchor.lon;
-        plant.ownerId ||= state?.account?.id || 'legacy-owner';
-        plant.ownerName ||= state?.account?.name || 'Guest Gardener';
+        plant.ownerId ||= account.id;
+        plant.ownerName ||= account.name;
         plant.tradeHistory ||= [`Discovered by ${plant.ownerName}`];
       }
       function activeOwner() { return state.account?.loggedIn ? state.account : { ...state.account, name: 'Guest Gardener' }; }
@@ -307,9 +307,9 @@
       function distanceMeters(a, b) { const r=6371000, p1=a.lat*Math.PI/180, p2=b.lat*Math.PI/180, dp=(b.lat-a.lat)*Math.PI/180, dl=(b.lon-a.lon)*Math.PI/180; const x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2; return 2*r*Math.atan2(Math.sqrt(x), Math.sqrt(1-x)); }
       function makeSeeds(origin, count, boost) { return Array.from({ length: count }, () => { const meters = 18 + Math.random() * 232; const point = offsetLocation(origin, meters, Math.random() * Math.PI * 2); return makeSeed(point, boost, null); }); }
       function makeSeed(point, boost, placeName) { const plant = randomSpecies(boost); const rarity = rollRarity(boost); return { id:uid('seed'), species:plant.name, category:plant.category, rarity:rarity.name, lat:point.lat, lon:point.lon, placeName:placeName || 'Wild shimmer', hotspot:Boolean(boost), createdAt:now() }; }
-      function makePlant(speciesName, rarityName, point, source) {
+      function makePlant(speciesName, rarityName, point, source) { return makePlantForOwner(speciesName, rarityName, point, source, activeOwner()); }
+      function makePlantForOwner(speciesName, rarityName, point, source, owner) {
         const plant = findSpecies(speciesName);
-        const owner = activeOwner();
         return { id:uid('plant'), species:plant.name, category:plant.category, color:plant.color, rarity:rarityName, lat:point.lat, lon:point.lon, anchor:{ lat:point.lat, lon:point.lon, placedAt:now(), label:'AR anchor' }, ownerId:owner.id, ownerName:owner.name, source, createdAt:now(), lastCareAt:now(), light:74, essence:74, harmony:74, health:100, streak:1, generation:1, dna:makeDna(rarityName), tradeHistory:[`Discovered by ${owner.name}`] };
       }
       function makeDna(rarityName) { const b=Math.min(3, rarities.findIndex((r)=>r.name===rarityName)/2); const t=()=>Math.min(3, Math.round(Math.random()*2 + b*Math.random())); return { growthRate:t(), maxHeight:t(), luminosity:t(), colorIntensity:t(), patternComplexity:t(), specialEffects:t(), bloomSize:t(), bloomFrequency:t(), environmentalAdaptation:t(), tradeAppeal:t(), lightAbsorption:t(), essenceEfficiency:t(), harmonyResilience:t() }; }
@@ -349,13 +349,13 @@
       function renderMap() {
         const stage=$('mapStage'); stage.querySelectorAll('.seed-marker,.plant-marker').forEach((n)=>n.remove());
         state.seeds.forEach((seed)=>{ const pos=markerPosition(seed), rarity=findRarity(seed.rarity); const marker=document.createElement('button'); marker.className='seed-marker'; marker.style.setProperty('--x',`${pos.x}%`); marker.style.setProperty('--y',`${pos.y}%`); marker.style.setProperty('--color',rarity.color); marker.title=`${seed.rarity} ${seed.species}`; marker.onclick=()=>selectSeed(seed.id); stage.appendChild(marker); });
-        state.plants.forEach((plant)=>{ normalizePlant(plant); const pos=markerPosition(plant.anchor), rarity=findRarity(plant.rarity); const marker=document.createElement('button'); marker.className='plant-marker'; marker.style.setProperty('--x',`${pos.x}%`); marker.style.setProperty('--y',`${pos.y}%`); marker.style.setProperty('--color',rarity.color); marker.title=`${plant.rarity} ${plant.species} owned by ${plant.ownerName}`; marker.onclick=()=>selectPlant(plant.id); stage.appendChild(marker); });
+        state.plants.forEach((plant)=>{ normalizePlant(plant, state.account); const pos=markerPosition(plant.anchor), rarity=findRarity(plant.rarity); const marker=document.createElement('button'); marker.className='plant-marker'; marker.style.setProperty('--x',`${pos.x}%`); marker.style.setProperty('--y',`${pos.y}%`); marker.style.setProperty('--color',rarity.color); marker.title=`${plant.rarity} ${plant.species} owned by ${plant.ownerName}`; marker.onclick=()=>selectPlant(plant.id); stage.appendChild(marker); });
         $('seedList').innerHTML = `<div class="row"><strong>Hotspots</strong><span>${state.hotspotStatus}</span></div>` + (state.seeds.map(seedButton).join('') || '<p class="muted">No seeds nearby.</p>'); $('seedList').querySelectorAll('[data-seed-id]').forEach((b)=>b.onclick=()=>selectSeed(b.dataset.seedId));
       }
       function seedButton(seed) { const dist=Math.round(distanceMeters(state.player, seed)); return `<button class="seed-card ${seed.id===state.selectedSeedId?'selected':''}" data-seed-id="${seed.id}"><div class="card-title"><h3>${seed.species}</h3><span class="tag">${seed.rarity}</span></div><p class="muted">${seed.category}. ${seed.hotspot?'Rare hotspot':'Wild seed'}. ${dist}m. ${seed.placeName || ''}</p></button>`; }
       function renderGarden() { $('plantCards').innerHTML = state.plants.map(plantCard).join('') || '<p class="muted">No plants yet.</p>'; $('plantCards').querySelectorAll('[data-plant-id]').forEach((b)=>b.onclick=()=>selectPlant(b.dataset.plantId)); $('inventorySeeds').innerHTML = state.seeds.map(seedButton).join('') || '<p class="muted">Seed pouch empty.</p>'; $('inventorySeeds').querySelectorAll('[data-seed-id]').forEach((b)=>b.onclick=()=>selectSeed(b.dataset.seedId)); }
       function meter(label, value, color) { return `<div><div class="meter-top"><span>${label}</span><span>${Math.round(value)}%</span></div><div class="bar"><span style="--value:${Math.round(value)}%;--color:${color}"></span></div></div>`; }
-      function plantCard(plant) { normalizePlant(plant); const stage=plantStage(plant), rarity=findRarity(plant.rarity), trade=rarity.trade && stage.index>=3 ? 'Tradeable' : 'Bound'; return `<button class="card ${plant.id===state.selectedPlantId?'selected':''}" data-plant-id="${plant.id}"><div class="card-title"><h3>${plant.species}</h3><span class="tag">${plant.rarity}</span></div><p class="muted">${plant.category}. ${stages[stage.index]}. ${trade}. Owner: ${plant.ownerName}. Anchor: ${anchorText(plant)}.</p><div class="meters">${meter('Light',plant.light,'#fff0a6')}${meter('Essence',plant.essence,'#bb8cff')}${meter('Harmony',plant.harmony,'#51f6ff')}${meter('Growth',stage.progress*100,rarity.color)}</div></button>`; }
+      function plantCard(plant) { normalizePlant(plant, state.account); const stage=plantStage(plant), rarity=findRarity(plant.rarity), trade=rarity.trade && stage.index>=3 ? 'Tradeable' : 'Bound'; return `<button class="card ${plant.id===state.selectedPlantId?'selected':''}" data-plant-id="${plant.id}"><div class="card-title"><h3>${plant.species}</h3><span class="tag">${plant.rarity}</span></div><p class="muted">${plant.category}. ${stages[stage.index]}. ${trade}. Owner: ${plant.ownerName}. Anchor: ${anchorText(plant)}.</p><div class="meters">${meter('Light',plant.light,'#fff0a6')}${meter('Essence',plant.essence,'#bb8cff')}${meter('Harmony',plant.harmony,'#51f6ff')}${meter('Growth',stage.progress*100,rarity.color)}</div></button>`; }
       function renderWeather() { $('weatherCondition').textContent=state.weather.condition; $('weatherTemp').textContent=`${Math.round(state.weather.tempC)}C`; $('weatherGrowth').textContent=`${state.weather.growth.toFixed(2)}x`; $('weatherDetails').textContent=JSON.stringify(state.weather,null,2); $('weatherEffects').innerHTML=[['Sunny','Light rises and growth accelerates'],['Cloudy','Light falls slightly'],['Rain','Essence rises'],['Storm','Stormvines benefit; Pyroblooms are vulnerable'],['Parks and gardens','Rare seeds are more likely']].map(([a,b])=>`<div class="row"><strong>${a}</strong><span>${b}</span></div>`).join(''); }
       function renderAr() {
         const plant=state.plants.find((p)=>p.id===state.selectedPlantId), seed=state.seeds.find((s)=>s.id===state.selectedSeedId), flower=$('arFlower');
@@ -382,7 +382,7 @@
       function moveSelectedPlant() { const plant=state.plants.find((p)=>p.id===state.selectedPlantId); if (!plant) return; if (!isOwner(plant)) { $('arStatus').textContent='Owner only'; return; } plant.anchor={ lat:state.player.lat, lon:state.player.lon, placedAt:now(), label:'Moved anchor' }; plant.lat=plant.anchor.lat; plant.lon=plant.anchor.lon; plant.tradeHistory.push(`Moved by ${state.account.name}`); $('arStatus').textContent='Moved to current location'; renderAll(); }
       function removeSelectedPlant() { const plant=state.plants.find((p)=>p.id===state.selectedPlantId); if (!plant) return; if (!isOwner(plant)) { $('arStatus').textContent='Owner only'; return; } state.plants=state.plants.filter((p)=>p.id!==plant.id); state.selectedPlantId=state.plants[0]?.id || null; $('arStatus').textContent='Plant removed'; renderAll(); }
       function care(kind) { const plant=state.plants.find((p)=>p.id===state.selectedPlantId); if (!plant) return; if (!isOwner(plant)) { $('arStatus').textContent='Owner only'; return; } applyDecay(plant); if (kind==='light') plant.light=clamp(plant.light+18+state.weather.light*.3); if (kind==='essence') plant.essence=clamp(plant.essence+18+state.weather.essence*.3); if (kind==='attention') plant.harmony=clamp(plant.harmony+10); plant.health=clamp(plant.health+3); plant.lastCareAt=now(); state.lumens+=2; state.xp+=3; renderAll(); }
-      function saveLogin() { const name=$('loginName').value.trim().slice(0, 24) || 'Guest Gardener'; state.account.name=name; state.account.loggedIn=true; state.plants.forEach((plant)=>{ if (plant.ownerId === 'legacy-owner' || plant.ownerName === 'Guest Gardener') { plant.ownerId=state.account.id; plant.ownerName=name; plant.tradeHistory[0]=`Discovered by ${name}`; } }); save(); renderAll(); }
+      function saveLogin() { const name=$('loginName').value.trim().slice(0, 24) || 'Guest Gardener'; state.account.name=name; state.account.loggedIn=true; state.plants.forEach((plant)=>{ if (plant.ownerName === 'Guest Gardener') { plant.ownerId=state.account.id; plant.ownerName=name; plant.tradeHistory[0]=`Discovered by ${name}`; } }); save(); renderAll(); }
       async function startCamera() { try { const stream=await navigator.mediaDevices.getUserMedia({ video:{ facingMode:{ ideal:'environment' } }, audio:false }); $('cameraFeed').srcObject=stream; $('arStage').classList.add('camera-on'); $('arStatus').textContent='Camera live'; } catch { $('arStatus').textContent='Camera simulated'; } }
       function showScreen(name) { document.querySelectorAll('.screen').forEach((s)=>s.classList.toggle('active',s.id===`screen-${name}`)); document.querySelectorAll('[data-screen-target]').forEach((b)=>b.classList.toggle('active',b.dataset.screenTarget===name)); }
       function setApiStatus(kind,text){ const el=$('globalStatus'); el.classList.remove('online','offline'); if(kind) el.classList.add(kind); $('globalStatusText').textContent=text; }
