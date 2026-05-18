@@ -10,7 +10,7 @@ const pool = process.env.DATABASE_URL
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -93,6 +93,7 @@ async function ensureSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+    alter table plants add column if not exists ar_anchor jsonb not null default '{"x":50,"y":68,"scale":1}'::jsonb;
   `);
 }
 
@@ -134,6 +135,17 @@ function randomSpecies() {
   return { name, category };
 }
 
+function validSpecies(name, category) {
+  const found = species.find(([speciesName]) => speciesName === name);
+  if (!found) throw new Error('Unknown seed species.');
+  return { name: found[0], category: found[1] || category };
+}
+
+function validRarity(name) {
+  if (!rarityTable.some((rarity) => rarity.name === name)) throw new Error('Unknown seed rarity.');
+  return name;
+}
+
 function makeStarterSeed(ownerId, index) {
   const selected = index === 0 ? { name: 'Helicoradian', category: 'Bioluminescent' } : randomSpecies();
   return {
@@ -151,6 +163,14 @@ function dnaFor(rarity) {
   const trait = () => Math.min(3, Math.round(Math.random() * 2 + bonus * Math.random()));
   return {
     growthRate: trait(), maxHeight: trait(), luminosity: trait(), colorIntensity: trait(), patternComplexity: trait(), specialEffects: trait(), bloomSize: trait(), bloomFrequency: trait(), environmentalAdaptation: trait(), tradeAppeal: trait(), lightAbsorption: trait(), essenceEfficiency: trait(), harmonyResilience: trait(),
+  };
+}
+
+function cleanAnchor(anchor) {
+  return {
+    x: Math.max(12, Math.min(88, Number(anchor?.x ?? 50))),
+    y: Math.max(48, Math.min(86, Number(anchor?.y ?? 68))),
+    scale: Math.max(0.65, Math.min(1.45, Number(anchor?.scale ?? 1))),
   };
 }
 
@@ -222,6 +242,19 @@ async function loginPlayer(body) {
   return getPlayerPayload(player.id);
 }
 
+async function collectSeed(body) {
+  if (!pool) return { fallback: true, error: 'DATABASE_URL is not configured' };
+  await ensureSchema();
+  const selected = validSpecies(String(body.species || ''), body.category);
+  const seedId = crypto.randomUUID();
+  await pool.query(
+    `insert into seeds (id, owner_id, species, category, rarity, source, latitude, longitude)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [seedId, body.ownerId, selected.name, selected.category, validRarity(String(body.rarity || 'Common')), String(body.source || 'wild discovery').slice(0, 80), Number(body.lat), Number(body.lon)],
+  );
+  return getPlayerPayload(body.ownerId, { collectedSeedId: seedId });
+}
+
 async function plantSeed(body) {
   if (!pool) return { fallback: true, error: 'DATABASE_URL is not configured' };
   await ensureSchema();
@@ -230,9 +263,9 @@ async function plantSeed(body) {
   const selected = seed.rows[0];
   const plantId = crypto.randomUUID();
   await pool.query(
-    `insert into plants (id, owner_id, species, category, rarity, anchor_lat, anchor_lon, dna)
-     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [plantId, body.ownerId, selected.species, selected.category, selected.rarity, Number(body.lat), Number(body.lon), dnaFor(selected.rarity)],
+    `insert into plants (id, owner_id, species, category, rarity, anchor_lat, anchor_lon, ar_anchor, dna)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [plantId, body.ownerId, selected.species, selected.category, selected.rarity, Number(body.lat), Number(body.lon), cleanAnchor(body.arAnchor), dnaFor(selected.rarity)],
   );
   await pool.query('update seeds set planted_at = now() where id = $1', [selected.id]);
   return getPlayerPayload(body.ownerId, { plantedPlantId: plantId });
@@ -249,6 +282,7 @@ function getServiceStatus() {
       cacheConfigured: Boolean(process.env.REDIS_URL || process.env.VALKEY_URL),
     },
     auth: ['email-password'],
+    gameplay: ['wild seed discovery', 'seed pouch', 'GPS plant anchors', 'AR screen anchors'],
     futureAuth: ['Google OAuth', 'Microsoft OAuth'],
     rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate })),
   };
@@ -274,12 +308,17 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'POST' && url.pathname === '/seeds/collect') {
+      jsonResponse(response, 200, await collectSeed(await readBody(request)));
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/plants') {
       jsonResponse(response, 200, await plantSeed(await readBody(request)));
       return;
     }
 
-    jsonResponse(response, 404, { error: 'Not found', routes: ['GET /health', 'POST /players/login', 'POST /plants'] });
+    jsonResponse(response, 404, { error: 'Not found', routes: ['GET /health', 'POST /players/login', 'POST /seeds/collect', 'POST /plants'] });
   } catch (error) {
     console.error(error);
     jsonResponse(response, 400, { error: error.message });
