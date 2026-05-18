@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Luminari</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f6f4ee;
+        color: #18221f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(135deg, rgba(37, 95, 91, 0.16), transparent 34%),
+          linear-gradient(315deg, rgba(186, 99, 72, 0.16), transparent 38%),
+          #f6f4ee;
+      }
+
+      main {
+        width: min(1040px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 42px 0;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding-bottom: 28px;
+        border-bottom: 1px solid rgba(24, 34, 31, 0.14);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2.5rem, 7vw, 5.8rem);
+        line-height: 0.9;
+        font-weight: 760;
+        letter-spacing: 0;
+      }
+
+      .summary {
+        max-width: 440px;
+        margin: 0;
+        color: #4d5a55;
+        font-size: 1rem;
+        line-height: 1.6;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+        gap: 18px;
+        margin-top: 28px;
+      }
+
+      section,
+      aside {
+        border: 1px solid rgba(24, 34, 31, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.68);
+        box-shadow: 0 18px 50px rgba(24, 34, 31, 0.08);
+      }
+
+      .panel {
+        padding: 22px;
+      }
+
+      .status-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .status-mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.95rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #8a8f88;
+        box-shadow: 0 0 0 6px rgba(138, 143, 136, 0.15);
+      }
+
+      .online .dot {
+        background: #248a5a;
+        box-shadow: 0 0 0 6px rgba(36, 138, 90, 0.16);
+      }
+
+      .offline .dot {
+        background: #b6463b;
+        box-shadow: 0 0 0 6px rgba(182, 70, 59, 0.16);
+      }
+
+      .timestamp {
+        color: #697570;
+        font-size: 0.92rem;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 22px;
+      }
+
+      .metric {
+        min-height: 118px;
+        padding: 16px;
+        border-radius: 8px;
+        background: #18221f;
+        color: #f7f2e8;
+      }
+
+      .metric span {
+        display: block;
+        color: #b9c3bd;
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 20px;
+        font-size: 1.25rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: #4d5a55;
+        font-size: 0.86rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .control {
+        display: flex;
+        gap: 10px;
+      }
+
+      input {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid rgba(24, 34, 31, 0.2);
+        border-radius: 8px;
+        padding: 12px 13px;
+        color: #18221f;
+        background: #fffdf8;
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 0 16px;
+        color: #fffdf8;
+        background: #255f5b;
+        font: inherit;
+        font-weight: 740;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: #1d4e4b;
+      }
+
+      pre {
+        min-height: 218px;
+        margin: 18px 0 0;
+        overflow: auto;
+        border-radius: 8px;
+        padding: 16px;
+        background: #101614;
+        color: #d8e4de;
+        font-size: 0.88rem;
+        line-height: 1.55;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .item {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 0;
+        border-top: 1px solid rgba(24, 34, 31, 0.12);
+      }
+
+      .item span {
+        color: #697570;
+      }
+
+      @media (max-width: 760px) {
+        header,
+        .status-row,
+        .control {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .grid,
+        .metrics {
+          grid-template-columns: 1fr;
+        }
+
+        main {
+          width: min(100% - 24px, 1040px);
+          padding: 28px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Luminari</h1>
+        <p class="summary">Operational view for the Luminari services running on Render.</p>
+      </header>
+
+      <div class="grid">
+        <section class="panel">
+          <div class="status-row" id="statusRow">
+            <div class="status-mark"><span class="dot"></span><span id="statusText">Checking</span></div>
+            <div class="timestamp" id="checkedAt">Starting up</div>
+          </div>
+
+          <div class="metrics">
+            <div class="metric"><span>API</span><strong id="apiState">Pending</strong></div>
+            <div class="metric"><span>Database</span><strong id="databaseState">Unknown</strong></div>
+            <div class="metric"><span>Cache</span><strong id="cacheState">Unknown</strong></div>
+          </div>
+
+          <pre id="payload">Waiting for API response...</pre>
+        </section>
+
+        <aside class="panel">
+          <label for="apiBase">API URL</label>
+          <div class="control">
+            <input id="apiBase" value="https://luminari-api.onrender.com" spellcheck="false" />
+            <button id="refreshButton" type="button">Refresh</button>
+          </div>
+
+          <div class="stack">
+            <div class="item"><strong>Frontend</strong><span>luminari-web</span></div>
+            <div class="item"><strong>Backend</strong><span>luminari-api</span></div>
+            <div class="item"><strong>Health path</strong><span>/health</span></div>
+          </div>
+        </aside>
+      </div>
+    </main>
+
+    <script>
+      const apiInput = document.querySelector('#apiBase');
+      const refreshButton = document.querySelector('#refreshButton');
+      const statusRow = document.querySelector('#statusRow');
+      const statusText = document.querySelector('#statusText');
+      const checkedAt = document.querySelector('#checkedAt');
+      const apiState = document.querySelector('#apiState');
+      const databaseState = document.querySelector('#databaseState');
+      const cacheState = document.querySelector('#cacheState');
+      const payload = document.querySelector('#payload');
+
+      const savedApiBase = localStorage.getItem('luminariApiBase');
+      if (savedApiBase) apiInput.value = savedApiBase;
+
+      function setStatus(kind, text) {
+        statusRow.classList.remove('online', 'offline');
+        if (kind) statusRow.classList.add(kind);
+        statusText.textContent = text;
+        checkedAt.textContent = `Checked ${new Date().toLocaleTimeString()}`;
+      }
+
+      async function refreshStatus() {
+        const apiBase = apiInput.value.trim().replace(/\/$/, '');
+        localStorage.setItem('luminariApiBase', apiBase);
+        setStatus('', 'Checking');
+        apiState.textContent = 'Pending';
+
+        try {
+          const response = await fetch(`${apiBase}/health`, { cache: 'no-store' });
+          const data = await response.json();
+
+          if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+          setStatus('online', 'Online');
+          apiState.textContent = data.status || 'OK';
+          databaseState.textContent = data.dependencies?.databaseConfigured ? 'Connected' : 'Not configured';
+          cacheState.textContent = data.dependencies?.cacheConfigured ? 'Connected' : 'Not configured';
+          payload.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          setStatus('offline', 'Offline');
+          apiState.textContent = 'Error';
+          databaseState.textContent = 'Unknown';
+          cacheState.textContent = 'Unknown';
+          payload.textContent = error.message;
+        }
+      }
+
+      refreshButton.addEventListener('click', refreshStatus);
+      apiInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') refreshStatus();
+      });
+
+      refreshStatus();
+    </script>
+  </body>
+</html>
