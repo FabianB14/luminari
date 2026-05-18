@@ -1,5 +1,12 @@
 services:
   - type: web
+    name: luminari-web
+    runtime: static
+    branch: main
+    buildCommand: npm run build
+    staticPublishPath: ./public
+
+  - type: web
     name: luminari-api
     runtime: node
     region: oregon
