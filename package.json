@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "build": "npm run check",
     "start": "node src/server.js",
     "worker": "node src/worker.js",
     "cleanup": "node scripts/nightly-cleanup.js",
