@@ -33,13 +33,12 @@ const rarityTable = [
 ];
 
 function jsonResponse(response, statusCode, body) {
-  const payload = JSON.stringify(body, null, 2);
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     ...corsHeaders,
   });
-  response.end(`${payload}\n`);
+  response.end(`${JSON.stringify(body, null, 2)}\n`);
 }
 
 async function readBody(request) {
@@ -61,6 +60,10 @@ async function ensureSchema() {
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+    alter table players add column if not exists email text;
+    alter table players add column if not exists password_hash text;
+    alter table players add column if not exists password_salt text;
+    create unique index if not exists players_email_unique on players (lower(email)) where email is not null;
     create table if not exists seeds (
       id uuid primary key,
       owner_id uuid not null references players(id) on delete cascade,
@@ -95,6 +98,25 @@ async function ensureSchema() {
 
 function cleanName(value) {
   return String(value || 'Guest Gardener').replace(/[^a-zA-Z0-9 _.'-]/g, '').trim().slice(0, 24) || 'Guest Gardener';
+}
+
+function cleanEmail(value) {
+  const email = String(value || '').trim().toLowerCase().slice(0, 160);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('Enter a valid email.');
+  return email;
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const normalized = String(password || '');
+  if (normalized.length < 6) throw new Error('Password must be at least 6 characters.');
+  const hash = crypto.scryptSync(normalized, salt, 64).toString('hex');
+  return { salt, hash };
+}
+
+function verifyPassword(password, salt, hash) {
+  const incoming = crypto.scryptSync(String(password || ''), salt, 64);
+  const stored = Buffer.from(hash, 'hex');
+  return stored.length === incoming.length && crypto.timingSafeEqual(stored, incoming);
 }
 
 function rollRarity() {
@@ -132,8 +154,8 @@ function dnaFor(rarity) {
   };
 }
 
-async function getPlayerPayload(playerId) {
-  const player = await pool.query('select * from players where id = $1', [playerId]);
+async function getPlayerPayload(playerId, extras = {}) {
+  const player = await pool.query('select id, email, name, lumens, xp, created_at, updated_at from players where id = $1', [playerId]);
   const seeds = await pool.query('select * from seeds where owner_id = $1 and planted_at is null order by created_at desc', [playerId]);
   const plants = await pool.query('select * from plants where owner_id = $1 order by created_at desc', [playerId]);
   return {
@@ -141,33 +163,62 @@ async function getPlayerPayload(playerId) {
     seeds: seeds.rows,
     plants: plants.rows,
     rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate })),
+    ...extras,
   };
+}
+
+async function grantStarterPack(playerId) {
+  const existingSeeds = await pool.query('select count(*)::int as count from seeds where owner_id = $1', [playerId]);
+  const existingPlants = await pool.query('select count(*)::int as count from plants where owner_id = $1', [playerId]);
+  if (existingSeeds.rows[0].count > 0 || existingPlants.rows[0].count > 0) return;
+  const starterSeeds = Array.from({ length: 5 }, (_, index) => makeStarterSeed(playerId, index));
+  for (const seed of starterSeeds) {
+    await pool.query(
+      'insert into seeds (id, owner_id, species, category, rarity, source) values ($1, $2, $3, $4, $5, $6)',
+      [seed.id, seed.ownerId, seed.species, seed.category, seed.rarity, seed.source],
+    );
+  }
 }
 
 async function loginPlayer(body) {
   if (!pool) return { fallback: true, error: 'DATABASE_URL is not configured' };
   await ensureSchema();
-  const deviceId = String(body.deviceId || crypto.randomUUID()).slice(0, 120);
+  const email = cleanEmail(body.email);
   const name = cleanName(body.name);
-  let result = await pool.query(
-    `insert into players (id, device_id, name)
-     values ($1, $2, $3)
-     on conflict (device_id) do update set name = excluded.name, updated_at = now()
-     returning *`,
-    [crypto.randomUUID(), deviceId, name],
-  );
-  const player = result.rows[0];
-  const existingSeeds = await pool.query('select count(*)::int as count from seeds where owner_id = $1', [player.id]);
-  const existingPlants = await pool.query('select count(*)::int as count from plants where owner_id = $1', [player.id]);
-  if (existingSeeds.rows[0].count === 0 && existingPlants.rows[0].count === 0) {
-    const starterSeeds = Array.from({ length: 5 }, (_, index) => makeStarterSeed(player.id, index));
-    for (const seed of starterSeeds) {
-      await pool.query(
-        'insert into seeds (id, owner_id, species, category, rarity, source) values ($1, $2, $3, $4, $5, $6)',
-        [seed.id, seed.ownerId, seed.species, seed.category, seed.rarity, seed.source],
-      );
+  const password = String(body.password || '');
+  const existing = await pool.query('select * from players where lower(email) = lower($1)', [email]);
+
+  let player;
+  if (existing.rows.length) {
+    player = existing.rows[0];
+    if (player.password_hash && !verifyPassword(password, player.password_salt, player.password_hash)) {
+      throw new Error('Incorrect password.');
     }
+    const credentials = player.password_hash ? {} : hashPassword(password);
+    const update = await pool.query(
+      `update players
+       set name = $2,
+           password_hash = coalesce($3, password_hash),
+           password_salt = coalesce($4, password_salt),
+           updated_at = now()
+       where id = $1
+       returning *`,
+      [player.id, name, credentials.hash || null, credentials.salt || null],
+    );
+    player = update.rows[0];
+  } else {
+    const credentials = hashPassword(password);
+    const deviceId = `${email}:${String(body.deviceId || crypto.randomUUID()).slice(0, 80)}`;
+    const result = await pool.query(
+      `insert into players (id, device_id, email, name, password_hash, password_salt)
+       values ($1, $2, $3, $4, $5, $6)
+       returning *`,
+      [crypto.randomUUID(), deviceId, email, name, credentials.hash, credentials.salt],
+    );
+    player = result.rows[0];
   }
+
+  await grantStarterPack(player.id);
   return getPlayerPayload(player.id);
 }
 
@@ -175,7 +226,7 @@ async function plantSeed(body) {
   if (!pool) return { fallback: true, error: 'DATABASE_URL is not configured' };
   await ensureSchema();
   const seed = await pool.query('select * from seeds where id = $1 and owner_id = $2 and planted_at is null', [body.seedId, body.ownerId]);
-  if (!seed.rows.length) return { error: 'Seed not found' };
+  if (!seed.rows.length) throw new Error('Seed not found.');
   const selected = seed.rows[0];
   const plantId = crypto.randomUUID();
   await pool.query(
@@ -184,7 +235,7 @@ async function plantSeed(body) {
     [plantId, body.ownerId, selected.species, selected.category, selected.rarity, Number(body.lat), Number(body.lon), dnaFor(selected.rarity)],
   );
   await pool.query('update seeds set planted_at = now() where id = $1', [selected.id]);
-  return getPlayerPayload(body.ownerId);
+  return getPlayerPayload(body.ownerId, { plantedPlantId: plantId });
 }
 
 function getServiceStatus() {
@@ -197,6 +248,8 @@ function getServiceStatus() {
       databaseConfigured: Boolean(process.env.DATABASE_URL),
       cacheConfigured: Boolean(process.env.REDIS_URL || process.env.VALKEY_URL),
     },
+    auth: ['email-password'],
+    futureAuth: ['Google OAuth', 'Microsoft OAuth'],
     rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate })),
   };
 }
@@ -229,7 +282,7 @@ const server = http.createServer(async (request, response) => {
     jsonResponse(response, 404, { error: 'Not found', routes: ['GET /health', 'POST /players/login', 'POST /plants'] });
   } catch (error) {
     console.error(error);
-    jsonResponse(response, 500, { error: error.message });
+    jsonResponse(response, 400, { error: error.message });
   }
 });
 
