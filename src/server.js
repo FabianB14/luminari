@@ -83,6 +83,7 @@ async function ensureSchema() {
     create index if not exists players_name_lookup on players (lower(name));
     create index if not exists seeds_owner_unplanted on seeds (owner_id, planted_at);
     create index if not exists plants_owner_location on plants (owner_id, location);
+    create index if not exists plants_world_anchor on plants (location, anchor_lat, anchor_lon) where location = 'world';
   `);
 }
 
@@ -119,6 +120,12 @@ const cleanName = (value) => String(value || '').trim().replace(/\s+/g, ' ').sli
 const cleanLocation = (value) => value === 'greenhouse' ? 'greenhouse' : 'world';
 const clampMeter = (value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
 const todayKey = (date = new Date()) => date.toISOString().slice(0, 10);
+const publicPlantFields = `
+  p.id, p.owner_id, p.species, p.category, p.rarity, p.anchor_lat, p.anchor_lon,
+  p.light, p.essence, p.harmony, p.health, p.generation, p.dna, p.created_at,
+  p.updated_at, p.ar_anchor, p.location, p.care_streak, p.last_cared_at,
+  players.name as owner_name
+`;
 
 function cleanEmail(value) {
   const email = String(value || '').trim().toLowerCase();
@@ -204,10 +211,46 @@ async function getPlayerPayload(playerId, extras = {}) {
   const [playerResult, seedResult, plantResult] = await Promise.all([
     pool.query('select id, email, name, lumens, xp, garden_tier, created_at, updated_at from players where id=$1', [playerId]),
     pool.query('select * from seeds where owner_id=$1 and planted_at is null order by created_at desc', [playerId]),
-    pool.query('select * from plants where owner_id=$1 order by created_at desc', [playerId])
+    pool.query(
+      `select ${publicPlantFields}, (p.owner_id = $1) as owned_by_current_player
+       from plants p join players on players.id = p.owner_id
+       where p.owner_id = $1 or (p.location = 'world' and p.anchor_lat is not null and p.anchor_lon is not null)
+       order by (p.owner_id = $1) desc, p.created_at desc
+       limit 120`,
+      [playerId]
+    )
   ]);
   if (!playerResult.rows[0]) throw new Error('Player not found.');
   return { player: playerResult.rows[0], seeds: seedResult.rows, plants: plantResult.rows, rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate })), ...extras };
+}
+
+async function getNearbyPlants(url) {
+  assertDb();
+  const lat = Number(url.searchParams.get('lat'));
+  const lon = Number(url.searchParams.get('lon'));
+  const radius = Math.max(25, Math.min(1000, Number(url.searchParams.get('radius') || 250)));
+  const viewerId = url.searchParams.get('playerId') || null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) throw new Error('lat and lon are required.');
+  const result = await pool.query(
+    `select ${publicPlantFields},
+       (p.owner_id = $4::uuid) as owned_by_current_player,
+       (6371000 * acos(least(1, greatest(-1,
+         cos(radians($1)) * cos(radians(p.anchor_lat)) * cos(radians(p.anchor_lon) - radians($2)) +
+         sin(radians($1)) * sin(radians(p.anchor_lat))
+       )))) as distance_meters
+     from plants p join players on players.id = p.owner_id
+     where p.location = 'world'
+       and p.anchor_lat is not null
+       and p.anchor_lon is not null
+       and (6371000 * acos(least(1, greatest(-1,
+         cos(radians($1)) * cos(radians(p.anchor_lat)) * cos(radians(p.anchor_lon) - radians($2)) +
+         sin(radians($1)) * sin(radians(p.anchor_lat))
+       )))) <= $3
+     order by distance_meters asc
+     limit 80`,
+    [lat, lon, radius, viewerId]
+  );
+  return { plants: result.rows, radius, privacy: 'Plant GPS anchors are returned for world display only. Player email and movement history are never returned.' };
 }
 
 async function grantStarterPack(playerId) {
@@ -359,11 +402,12 @@ const server = http.createServer(async (req, res) => {
         database: Boolean(pool),
         dependencies: { databaseConfigured: Boolean(pool), cacheConfigured: Boolean(process.env.REDIS_URL || process.env.VALKEY_URL) },
         auth: ['email-password'],
-        gameplay: ['login', 'starter-pack', 'seed-pouch', 'planting', 'persistent-care', 'plant-move', 'greenhouse-flag'],
+        gameplay: ['login', 'starter-pack', 'seed-pouch', 'planting', 'public-world-plants', 'persistent-care', 'plant-move', 'greenhouse-flag'],
         futureAuth: ['Google OAuth', 'Microsoft OAuth'],
         rarityRates: rarityTable.map(({ name, rate }) => ({ name, rate }))
       });
     }
+    if (req.method === 'GET' && url.pathname === '/plants/nearby') return json(res, 200, await getNearbyPlants(url));
     if (req.method === 'POST' && url.pathname === '/players/login') return json(res, 200, await loginPlayer(await parseBody(req)));
     if (req.method === 'POST' && url.pathname === '/seeds/collect') return json(res, 200, await collectSeed(await parseBody(req)));
     if (req.method === 'POST' && url.pathname === '/plants') return json(res, 200, await plantSeed(await parseBody(req)));
@@ -377,7 +421,7 @@ const server = http.createServer(async (req, res) => {
     const deleteMatch = url.pathname.match(/^\/plants\/([^/]+)$/);
     if (req.method === 'DELETE' && deleteMatch) return json(res, 200, await removePlant(deleteMatch[1], await parseBody(req)));
 
-    return json(res, 404, { error: 'Route not found.', routes: ['GET /health', 'POST /players/login', 'POST /seeds/collect', 'POST /plants', 'PATCH /plants/:id/care', 'PATCH /plants/:id/move', 'PATCH /plants/:id/location', 'DELETE /plants/:id'] });
+    return json(res, 404, { error: 'Route not found.', routes: ['GET /health', 'GET /plants/nearby?lat=&lon=&radius=', 'POST /players/login', 'POST /seeds/collect', 'POST /plants', 'PATCH /plants/:id/care', 'PATCH /plants/:id/move', 'PATCH /plants/:id/location', 'DELETE /plants/:id'] });
   } catch (error) {
     return json(res, 400, { error: error.message || 'Something went wrong.' });
   }
